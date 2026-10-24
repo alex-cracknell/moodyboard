@@ -1,6 +1,6 @@
 import * as db from './db.js';
 import { createZip, readZip } from './zip.js';
-import { state, collectSubtree, blobRefs, loadBoards } from './store.js';
+import { state, collectSubtree, blobRefs, loadBoards, getTombstones, saveTombstones } from './store.js';
 import { extForMime } from './util.js';
 
 const FORMAT = 'moodboard-backup';
@@ -102,8 +102,23 @@ export async function inspectBackup(file) {
 
 // mode: 'merge' (add and update, keep everything else) | 'replace' (wipe first)
 export async function restoreBackup({ files, manifest }, mode, onProgress) {
-  const boards = manifest.boards || [], cards = manifest.cards || [], blobs = manifest.blobs || [];
-  if (mode === 'replace') await db.clearAll(['boards', 'cards', 'blobs']);
+  let boards = manifest.boards || [], cards = manifest.cards || [];
+  const blobs = manifest.blobs || [];
+  if (mode === 'replace') {
+    // Record what's being wiped so Drive sync removes it on other devices too,
+    // and stamp the restored boards as newest so they win.
+    const keep = new Set([...boards, ...cards].map(r => r.id));
+    const [oldBoards, oldCards] = await Promise.all([db.getAll('boards'), db.getAll('cards')]);
+    const tombs = await getTombstones();
+    const now = Date.now();
+    for (const r of oldBoards) if (!keep.has(r.id)) tombs[r.id] = { store: 'boards', at: now };
+    for (const r of oldCards) if (!keep.has(r.id)) tombs[r.id] = { store: 'cards', at: now };
+    for (const id of keep) delete tombs[id];
+    await saveTombstones(tombs);
+    boards = boards.map(b => ({ ...b, updated: now }));
+    cards = cards.map(c => ({ ...c, updated: now }));
+    await db.clearAll(['boards', 'cards', 'blobs']);
+  }
   let done = 0;
   const total = blobs.length;
   // Files first, in small batches so one huge transaction doesn't stall the phone.

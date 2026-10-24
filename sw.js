@@ -1,6 +1,6 @@
 // Service worker: makes the app work offline and receives items shared from other apps.
 // Bump VERSION whenever you change any app file so phones pick up the update.
-const VERSION = 'moodboard-v1.0.0';
+const VERSION = 'moodboard-v1.1.1';
 const SHELL = [
   './',
   './index.html',
@@ -19,6 +19,10 @@ const SHELL = [
   './js/backup.js',
   './js/backup-ui.js',
   './js/home.js',
+  './js/config.js',
+  './js/drive.js',
+  './js/sync.js',
+  './js/sync-ui.js',
   './fonts/bricolage-grotesque-latin-standard-normal.woff2',
   './fonts/bricolage-grotesque-latin-ext-standard-normal.woff2',
   './icons/icon-192.png',
@@ -89,7 +93,8 @@ async function receiveShare(request) {
 
 function putInbox(item) {
   return new Promise((resolve, reject) => {
-    const req = indexedDB.open('moodboard', 1);
+    // No version number: open whatever version the app has created.
+    const req = indexedDB.open('moodboard');
     req.onupgradeneeded = () => {
       const db = req.result;
       // Same schema as js/db.js, in case the share arrives before the app ever opened.

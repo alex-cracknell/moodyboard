@@ -6,6 +6,7 @@ import { mountBoard } from './canvas.js';
 import { mountHome, applyTheme } from './home.js';
 import { handlePop, closeAllOverlays, historySettled, sheet, toast, promptDialog } from './ui.js';
 import { setOnDataReplaced } from './backup-ui.js';
+import { initSync, schedule as scheduleSync } from './sync.js';
 
 const app = $('#app');
 let current = null;      // { kind: 'home'|'board', api, id }
@@ -74,6 +75,7 @@ subscribe(() => {
 
 setOnDataReplaced(async () => {
   await loadBoards();
+  scheduleSync(1000);
   if (current) { current.api.destroy(); current = null; }
   navigate({ home: true }, { replace: true });
 });
@@ -129,6 +131,7 @@ async function boot() {
   // Ask the browser to keep our storage. Chrome decides silently.
   try { if (navigator.storage?.persist && !(await navigator.storage.persisted())) await navigator.storage.persist(); } catch {}
   setTimeout(() => collectGarbage().catch(() => {}), 3000);
+  initSync().catch(() => {});
   checkInbox().catch(() => {});
   if ('serviceWorker' in navigator && location.protocol !== 'file:') {
     let reloading = false;

@@ -6,18 +6,24 @@ import { fillBoardCover, cardSearchText, TYPE_LABEL } from './cards.js';
 import { sheet, menu, toast, confirmDialog, promptDialog, toggle } from './ui.js';
 import { pickColor } from './editors.js';
 import { exportFlow, importFlow, showReminderIfDue, reminderControls } from './backup-ui.js';
+import { syncButton, syncSection, shareBoardFlow } from './sync-ui.js';
+import * as sync from './sync.js';
 
-export const APP_VERSION = '1.0.0';
+export const APP_VERSION = '1.1.0';
 
 export function mountHome(root, { onNavigate, installPrompt }) {
   const reminderSlot = h('div', { class: 'reminder-slot' });
+  const syncBtn = syncButton();
   const search = h('input', { class: 'search-input', type: 'search', placeholder: 'Search boards and cards', 'aria-label': 'Search boards and cards', enterkeyhint: 'search' });
   const grid = h('div', { class: 'board-grid' });
   const results = h('div', { class: 'search-results', hidden: true });
   const header = h('header', { class: 'home-head' },
     h('div', { class: 'home-title-row' },
       h('h1', { class: 'home-title' }, 'Moodboards'),
-      h('button', { class: 'icon-btn', 'aria-label': 'Settings and backup', html: icon('settings'), onclick: () => openSettings({ onNavigate, installPrompt }) }),
+      h('div', { class: 'home-actions' },
+        syncBtn,
+        h('button', { class: 'icon-btn', 'aria-label': 'Settings and backup', html: icon('settings'), onclick: () => openSettings({ onNavigate, installPrompt }) }),
+      ),
     ),
     h('label', { class: 'search-wrap' }, h('span', { html: icon('search') }), search),
   );
@@ -89,6 +95,7 @@ export function mountHome(root, { onNavigate, installPrompt }) {
       { label: 'Colour', icon: 'palette', value: 'color' },
       { label: 'Duplicate', icon: 'copy', value: 'dup' },
       { label: 'Export this board', icon: 'download', value: 'export', hint: 'Zip file' },
+      syncReady() ? { label: 'Share a copy', icon: 'share', value: 'share', hint: 'Drive link' } : null,
       { sep: true },
       { label: 'Delete', icon: 'trash', value: 'delete', danger: true },
     ]);
@@ -107,6 +114,7 @@ export function mountHome(root, { onNavigate, installPrompt }) {
       toast('Board duplicated');
     }
     if (v === 'export') exportFlow(b.id);
+    if (v === 'share') shareBoardFlow(b.id, b.name);
     if (v === 'delete') {
       const ok = await confirmDialog(`Delete “${b.name}”?`, 'This deletes the board and everything inside it, including boards within it.');
       if (!ok) return;
@@ -169,7 +177,7 @@ export function mountHome(root, { onNavigate, installPrompt }) {
   refreshReminder();
   return {
     refresh() { render(); refreshReminder(); },
-    destroy() { document.removeEventListener('backup-done', refreshReminder); view.remove(); },
+    destroy() { document.removeEventListener('backup-done', refreshReminder); syncBtn.destroy(); view.remove(); },
   };
 }
 
@@ -195,6 +203,10 @@ export async function openSettings({ onNavigate, installPrompt } = {}) {
   const body = h('div', { class: 'settings' });
   const draw = async () => {
     body.innerHTML = '';
+    // Sync
+    if (sync.isConfigured()) {
+      body.append(h('section', { class: 'set-group' }, h('h3', {}, 'Sync with Google Drive'), await syncSection(draw)));
+    }
     // Backups
     body.append(h('section', { class: 'set-group' },
       h('h3', {}, 'Backups'),
@@ -249,10 +261,12 @@ export async function openSettings({ onNavigate, installPrompt } = {}) {
     // Danger
     body.append(h('section', { class: 'set-group danger-zone' },
       h('h3', {}, 'Delete everything'),
-      h('p', { class: 'set-hint' }, 'Removes every board, card and file from this phone. Back up first if you might want them again.'),
+      h('p', { class: 'set-hint' }, 'Removes every board, card and file from this phone. Back up first if you might want them again. If Google Drive is connected, it’s disconnected first and the copy in Drive is left alone.'),
       h('button', { class: 'btn btn-danger', onclick: async () => {
         const ok = await confirmDialog('Delete everything?', 'Every board, card and file on this phone will be deleted. This can’t be undone.', 'Delete everything');
         if (!ok) return;
+        if (await sync.isConnected()) await sync.disconnect();
+        await db.put('meta', { key: 'tombstones', value: {} });
         await db.clearAll(['boards', 'cards', 'blobs']);
         await loadBoards();
         sh.close();
@@ -260,7 +274,8 @@ export async function openSettings({ onNavigate, installPrompt } = {}) {
         onNavigate?.({ home: true, reload: true });
       } }, 'Delete all data'),
     ));
-    body.append(h('p', { class: 'about' }, `Moodboard ${APP_VERSION} · Everything is stored only in this browser on this device.`));
+    body.append(h('p', { class: 'about' }, `Moodboard ${APP_VERSION} · Your boards are stored on this device${sync.isConfigured() ? ' and, if you connect it, your own Google Drive' : ''}. `,
+      h('a', { href: 'privacy.html', target: '_blank', rel: 'noopener' }, 'Privacy policy')));
   };
   const sh = sheet({ title: 'Settings', body, full: true, onClose: () => document.dispatchEvent(new CustomEvent('backup-done')) });
   draw();
@@ -287,6 +302,10 @@ async function fillStorage(usage, persistLine) {
   } catch {
     usage.textContent = 'Storage details aren’t available in this browser.';
   }
+}
+
+function syncReady() {
+  return sync.isConfigured() && !['off', 'unavailable'].includes(sync.getStatus().state);
 }
 
 export function applyTheme(theme) {

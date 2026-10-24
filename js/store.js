@@ -51,6 +51,42 @@ function noteChange() {
   changeStamp = setTimeout(() => db.saveSettings({ lastChangeAt: Date.now() }), 400);
 }
 
+// ---------- deletion records ----------
+// Sync needs to know what was deleted, or the other device would put it back.
+// tombstones: { [id]: { store, at } }
+let tombs = null;
+export async function getTombstones() {
+  if (!tombs) {
+    const row = await db.get('meta', 'tombstones');
+    tombs = row ? row.value : {};
+  }
+  return tombs;
+}
+export async function saveTombstones(next) {
+  tombs = next;
+  // Forget deletions older than 120 days.
+  const cutoff = Date.now() - 120 * 86400_000;
+  for (const [id, t] of Object.entries(tombs)) if (t.at < cutoff) delete tombs[id];
+  await db.put('meta', { key: 'tombstones', value: tombs });
+}
+async function recordTombstones(applied) {
+  const t = await getTombstones();
+  let dirty = false;
+  const now = Date.now();
+  for (const { store, id, value } of applied) {
+    if (store !== 'boards' && store !== 'cards') continue;
+    if (value == null) { t[id] = { store, at: now }; dirty = true; }
+    else if (t[id]) { delete t[id]; dirty = true; }
+  }
+  if (dirty) await saveTombstones(t);
+}
+
+// Restored records (undo/redo) get a fresh timestamp so "newest edit wins" keeps them.
+function freshen(store, value) {
+  if (!value || (store !== 'boards' && store !== 'cards')) return value;
+  return { ...value, updated: Date.now() };
+}
+
 // changes: [{store, id, before, after}]  (before/after null = absent)
 export async function commit(changes, { record = true, label = '' } = {}) {
   changes = changes.filter(Boolean).map(c => ({ ...c, before: clone(c.before), after: clone(c.after) }));
@@ -68,7 +104,9 @@ export async function commit(changes, { record = true, label = '' } = {}) {
     }
   }
   for (const c of changes) applyToMemory(c.store, c.id, c.after);
-  await db.applyChanges(changes.map(c => ({ store: c.store, id: c.id, value: c.after })));
+  const applied = changes.map(c => ({ store: c.store, id: c.id, value: c.after }));
+  await db.applyChanges(applied);
+  await recordTombstones(applied);
   if (record) {
     state.undo.push({ changes, label });
     if (state.undo.length > 100) state.undo.shift();
@@ -78,26 +116,41 @@ export async function commit(changes, { record = true, label = '' } = {}) {
   emit(changes, { kind: 'commit' });
 }
 
+// Changes that arrived from another device via sync.
+export async function applyRemote(changes) {
+  changes = changes.filter(Boolean);
+  if (!changes.length) return;
+  for (const c of changes) applyToMemory(c.store, c.id, c.after);
+  await db.applyChanges(changes.map(c => ({ store: c.store, id: c.id, value: c.after })));
+  // Undo history may now refer to records that changed underneath it.
+  state.undo = state.undo.filter(op => !op.changes.some(c => changes.some(r => r.id === c.id)));
+  state.redo = [];
+  emit(changes, { kind: 'sync' });
+}
+
 export async function undo() {
   const op = state.undo.pop();
   if (!op) return false;
-  const rev = op.changes.map(c => ({ store: c.store, id: c.id, value: c.before }));
-  for (const c of op.changes) applyToMemory(c.store, c.id, c.before);
+  const rev = op.changes.map(c => ({ store: c.store, id: c.id, value: freshen(c.store, c.before) }));
+  for (const r of rev) applyToMemory(r.store, r.id, r.value);
   await db.applyChanges(rev);
+  await recordTombstones(rev);
   state.redo.push(op);
   noteChange();
-  emit(op.changes.map(c => ({ ...c, before: c.after, after: c.before })), { kind: 'undo' });
+  emit(op.changes.map((c, i) => ({ ...c, before: c.after, after: rev[i].value })), { kind: 'undo' });
   return op.label || true;
 }
 
 export async function redo() {
   const op = state.redo.pop();
   if (!op) return false;
-  for (const c of op.changes) applyToMemory(c.store, c.id, c.after);
-  await db.applyChanges(op.changes.map(c => ({ store: c.store, id: c.id, value: c.after })));
+  const fwd = op.changes.map(c => ({ store: c.store, id: c.id, value: freshen(c.store, c.after) }));
+  for (const r of fwd) applyToMemory(r.store, r.id, r.value);
+  await db.applyChanges(fwd);
+  await recordTombstones(fwd);
   state.undo.push(op);
   noteChange();
-  emit(op.changes, { kind: 'redo' });
+  emit(op.changes.map((c, i) => ({ ...c, after: fwd[i].value })), { kind: 'redo' });
   return op.label || true;
 }
 

@@ -11,6 +11,8 @@ import {
   editLink, editSwatch, editImageDetails, editComments, pickColor, pickBoard, viewImage, sketchPad, recordVoice,
 } from './editors.js';
 import { exportFlow } from './backup-ui.js';
+import { syncButton, shareBoardFlow } from './sync-ui.js';
+import * as sync from './sync.js';
 
 const GRID = 12;
 const MIN_S = 0.12, MAX_S = 3;
@@ -43,9 +45,11 @@ export async function mountBoard(root, boardId, { onNavigate }) {
   const crumbs = h('div', { class: 'crumbs' });
   const undoBtn = h('button', { class: 'icon-btn', 'aria-label': 'Undo', html: icon('undo'), onclick: doUndo });
   const redoBtn = h('button', { class: 'icon-btn', 'aria-label': 'Redo', html: icon('redo'), onclick: doRedo });
+  const syncBtn = syncButton();
   const topbar = h('header', { class: 'topbar board-top' },
     h('button', { class: 'icon-btn', 'aria-label': 'Back', html: icon('back'), onclick: goUp }),
     crumbs,
+    syncBtn,
     undoBtn, redoBtn,
     h('button', { class: 'icon-btn', 'aria-label': 'Board options', html: icon('more'), onclick: boardMenu }),
   );
@@ -1503,6 +1507,26 @@ export async function mountBoard(root, boardId, { onNavigate }) {
   };
   document.addEventListener('paste', onDocPaste);
 
+  // Laptop: drag files (or a link) from the desktop or another tab onto the board.
+  viewport.addEventListener('dragover', e => { e.preventDefault(); e.dataTransfer.dropEffect = 'copy'; viewport.classList.add('drop-hover'); });
+  viewport.addEventListener('dragleave', e => { if (e.target === viewport) viewport.classList.remove('drop-hover'); });
+  viewport.addEventListener('drop', async e => {
+    e.preventDefault();
+    viewport.classList.remove('drop-hover');
+    const w = toWorld(e.clientX, e.clientY);
+    const at = { x: w.x - 100, y: w.y - 60 };
+    const files = [...(e.dataTransfer?.files || [])];
+    if (files.length) {
+      const imgs = files.filter(f => f.type.startsWith('image/'));
+      const others = files.filter(f => !f.type.startsWith('image/'));
+      if (imgs.length) await addImageFiles(imgs, at);
+      if (others.length) await addFileCards(others, imgs.length ? null : at);
+      return;
+    }
+    const text = e.dataTransfer?.getData('text/uri-list') || e.dataTransfer?.getData('text/plain');
+    if (text) addFromText(text.split('\n').find(l => l && !l.startsWith('#')) || text, { x: snap(at.x), y: snap(at.y) });
+  });
+
   const onKey = e => {
     if (document.querySelector('.overlay') || editingId) return;
     if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z') { e.preventDefault(); e.shiftKey ? doRedo() : doUndo(); }
@@ -1551,6 +1575,7 @@ export async function mountBoard(root, boardId, { onNavigate }) {
       { sep: true },
       { label: 'Duplicate board', icon: 'copy', value: 'dup' },
       { label: 'Export this board', icon: 'download', value: 'export', hint: 'Zip file' },
+      sync.isConfigured() && !['off', 'unavailable'].includes(sync.getStatus().state) ? { label: 'Share a copy', icon: 'share', value: 'share', hint: 'Drive link' } : null,
       { sep: true },
       { label: 'Delete board', icon: 'trash', value: 'delete', danger: true },
     ]);
@@ -1589,6 +1614,7 @@ export async function mountBoard(root, boardId, { onNavigate }) {
       toast('Board duplicated', { label: 'Open', onClick: () => onNavigate({ board: rootId }) });
     }
     if (v === 'export') exportFlow(boardId);
+    if (v === 'share') shareBoardFlow(boardId, b.name);
     if (v === 'delete') {
       const ok = await confirmDialog(`Delete “${b.name}”?`, 'This deletes the board and everything inside it, including boards within it. This can’t be undone, so back up first if you might want it later.');
       if (!ok) return;
@@ -1604,13 +1630,19 @@ export async function mountBoard(root, boardId, { onNavigate }) {
   }
 
   // ---------- react to store changes ----------
-  const unsub = subscribe(changes => {
+  const unsub = subscribe((changes, meta) => {
     let redrawAll = false;
     const touched = new Set();
+    const fromSync = meta?.kind === 'sync';
     for (const ch of changes) {
+      // Don't yank a card out from under the person typing in it; their edit is newer anyway.
+      if (fromSync && ch.id === editingId) continue;
       if (ch.store === 'boards') {
         if (ch.id === boardId) {
-          if (!ch.after) return;
+          if (!ch.after) {
+            if (fromSync) { toast('This board was deleted on another device'); onNavigate({ home: true }); }
+            return;
+          }
           if (!ch.silent) renderTitle();
         }
         // A sub-board shown as a card changed: refresh its tile.
@@ -1670,6 +1702,7 @@ export async function mountBoard(root, boardId, { onNavigate }) {
     destroy() {
       if (editingId) stopEdit();
       unsub();
+      syncBtn.destroy();
       ro.disconnect();
       document.removeEventListener('paste', onDocPaste);
       document.removeEventListener('keydown', onKey);

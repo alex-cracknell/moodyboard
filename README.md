@@ -1,6 +1,6 @@
 # Moodboard
 
-A Milanote-style moodboard app that runs in Chrome on your phone. Every board, card, image and file is stored on the phone itself (in the browser's IndexedDB storage). Nothing is uploaded anywhere: GitHub Pages only serves the app's code.
+A Milanote-style moodboard app that runs in Chrome on your phone or laptop. Every board, card, image and file is stored on the device itself (in the browser's IndexedDB storage). GitHub Pages only serves the app's code. Optionally, each person can sync their boards between their own devices through their own Google Drive (see SETUP-GOOGLE-DRIVE.md).
 
 ## Put it on GitHub Pages
 
@@ -17,6 +17,14 @@ A Milanote-style moodboard app that runs in Chrome on your phone. Every board, c
 
 Installing matters: the installed app opens full screen, works offline, can receive images shared from other apps, and Chrome is much less likely to clear its storage.
 
+## Sync between phone and laptop
+
+The same address works in Chrome on a laptop (you can install it there too from the address bar). To keep devices in step, turn on Google Drive sync: follow SETUP-GOOGLE-DRIVE.md once, then tap **Connect Google Drive** in Settings on each device. Each person signs in with their own Google account, so their boards stay private.
+
+With sync on, a full backup zip is also saved to Drive each week, and the backup reminder only appears if sync stops working.
+
+To give someone a copy of one board: open it, ⋮ → **Share a copy**. The board goes into your Drive with a link you can send. They download it and use Settings → Import a backup → Add to my boards. (Without Drive connected, use ⋮ → Export this board and send the file.)
+
 ## Backups
 
 - **Back up**: Settings → Back up now. The app builds a single `.zip` file (a `manifest.json` describing your boards plus a `files/` folder of images and attachments), then lets you save it to a folder you choose (where Chrome supports that) or download it to Downloads. Move a copy off the phone, for example to Google Drive or your NAS.
@@ -30,7 +38,8 @@ Notes (bold, italic, strikethrough, headings, lists, quotes), headings, images (
 
 ## Using the canvas
 
-- Drag empty space to move around; pinch to zoom.
+- Drag empty space to move around; pinch to zoom. On a laptop, scroll to move and Ctrl+scroll (or pinch the trackpad) to zoom.
+- On a laptop you can drag image files, other files or links straight onto a board, and paste with Ctrl+V.
 - Tap a card to select it; tap it again (or double-tap) to edit or open it.
 - Drag a card to move it; drag it onto a column to put it in the column.
 - Double-tap empty space to drop a note there; press and hold empty space to choose what to add there.
@@ -44,6 +53,6 @@ When you change any file, also change `VERSION` at the top of `sw.js` (for examp
 
 ## Limits worth knowing
 
-- Data lives in Chrome on that one phone. Clearing Chrome's site data for the app, or uninstalling it, deletes your boards. Back up.
+- Without sync, data lives in Chrome on that one device. Clearing Chrome's site data for the app, or uninstalling it, deletes your boards. Back up, or turn on sync.
 - Websites block other sites from reading their pages, so link cards can't fetch previews automatically; you can add your own picture to a link card.
 - Chrome on Android may not offer sharing a `.zip` file through the share sheet; the Download and Save to a folder options always work.

@@ -627,3 +627,20 @@ button:disabled { opacity: .35; cursor: default; }
   .ctx-bar { left: 50%; right: auto; transform: translateX(-50%); justify-content: center; }
   .ctx-label { font-size: 12px; }
 }
+
+/* ---------- sync ---------- */
+.home-actions { display: flex; align-items: center; gap: 4px; }
+.sync-btn {
+  height: 42px; min-width: 42px; padding: 0 10px; border-radius: 12px; flex: none;
+  display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+  color: var(--ink-2); font-size: 14px; font-weight: 650;
+}
+.sync-btn:active { background: var(--field); }
+.sync-btn.s-idle { color: var(--s-green); }
+.sync-btn.s-needs-auth { background: var(--sun); color: #1d2230; padding: 0 12px 0 10px; }
+.sync-btn.s-error { color: var(--danger); }
+.sync-btn.s-syncing .ic { animation: spin 1s linear infinite; }
+.sync-prog { font-size: 12px; font-variant-numeric: tabular-nums; }
+@keyframes spin { to { transform: rotate(360deg); } }
+.set-hint.warn { color: var(--danger); }
+.viewport.drop-hover { box-shadow: inset 0 0 0 4px var(--sun); }
