@@ -1,6 +1,6 @@
 // Service worker: makes the app work offline and receives items shared from other apps.
 // Bump VERSION whenever you change any app file so phones pick up the update.
-const VERSION = 'moodboard-v1.1.2';
+const VERSION = 'moodboard-v1.2.0';
 const SHELL = [
   './',
   './index.html',
@@ -23,6 +23,7 @@ const SHELL = [
   './js/drive.js',
   './js/sync.js',
   './js/sync-ui.js',
+  './js/clipboard.js',
   './fonts/bricolage-grotesque-latin-standard-normal.woff2',
   './fonts/bricolage-grotesque-latin-ext-standard-normal.woff2',
   './icons/icon-192.png',

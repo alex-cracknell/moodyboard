@@ -47,9 +47,17 @@ Notes (bold, italic, strikethrough, headings, lists, quotes), headings, images (
 - Select a card and tap **Connect**, then tap another card, to draw an arrow between them. Drag a line's ends onto cards to attach them.
 - Undo and redo are in the top bar.
 
+### Copy and paste
+
+- **Laptop**: select a card and press Ctrl+C (copy) or Ctrl+X (cut), then Ctrl+V to paste it under the mouse pointer, on the same board or any other. Ctrl+D duplicates the selected card. Copying a column brings its cards; copying a board card brings the whole board and everything in it.
+- **Right-click** a card for its options, or empty space to add something there (including **Paste card**).
+- **Phone**: press and hold a card (or tap More) → **Copy** or **Cut**, then on any board tap + → **Paste card**. Press and hold empty space first to paste at that spot.
+- Copying a note, to-do list, link or colour also puts its text on the normal clipboard, so you can paste it into other apps. For an image, use More → **Copy image for other apps**.
+- Escape closes menus and dialogs.
+
 ## Updating the app later
 
-When you change any file, also change `VERSION` at the top of `sw.js` (for example `moodboard-v1.0.1`). Phones then download the new version and show an "An update is ready" message with a Reload button. Your boards are not affected by updates.
+When you change any file, also change `VERSION` at the top of `sw.js` (for example `moodboard-v1.2.1`). Phones then download the new version and show an "An update is ready" message with a Reload button. Your boards are not affected by updates.
 
 ## Limits worth knowing
 

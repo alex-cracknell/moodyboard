@@ -9,7 +9,7 @@ import { exportFlow, importFlow, showReminderIfDue, reminderControls } from './b
 import { syncButton, syncSection, shareBoardFlow } from './sync-ui.js';
 import * as sync from './sync.js';
 
-export const APP_VERSION = '1.1.0';
+export const APP_VERSION = '1.2.0';
 
 export function mountHome(root, { onNavigate, installPrompt }) {
   const reminderSlot = h('div', { class: 'reminder-slot' });

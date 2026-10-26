@@ -644,3 +644,4 @@ button:disabled { opacity: .35; cursor: default; }
 @keyframes spin { to { transform: rotate(360deg); } }
 .set-hint.warn { color: var(--danger); }
 .viewport.drop-hover { box-shadow: inset 0 0 0 4px var(--sun); }
+.add-ic.t-pastecard { background: var(--sun); color: #1d2230; }

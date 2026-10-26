@@ -47,6 +47,17 @@ function popOverlay(o, fromBack) {
   });
 }
 
+// Escape closes the top menu or dialog (laptop).
+document.addEventListener('keydown', e => {
+  if (e.key !== 'Escape' || !overlays.length) return;
+  const top = overlays[overlays.length - 1];
+  // Only menus, dialogs and full-screen layers; text editing handles its own Escape.
+  if (!top.el || top.dismissible === false) return;
+  e.preventDefault();
+  e.stopImmediatePropagation();
+  top.close();
+}, true);
+
 // Resolves once pending history changes from overlays have finished.
 export function historySettled() { return histQ; }
 
@@ -82,7 +93,7 @@ export function sheet({ title, body, actions, className = '', onClose, full = fa
   if (dismissible) backdrop.addEventListener('click', () => o.close());
 
   const o = {
-    el: panel, body: content, root, closed: false,
+    el: panel, body: content, root, closed: false, dismissible,
     close() { o._close(false); },
     _close(fromBack) {
       if (o.closed) return;

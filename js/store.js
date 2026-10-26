@@ -257,6 +257,11 @@ export async function collectGarbage() {
   const [cards, boards, keys] = await Promise.all([db.getAll('cards'), db.getAll('boards'), db.getAllKeys('blobs')]);
   const used = new Set();
   for (const r of [...cards, ...boards]) for (const id of blobRefs(r)) used.add(id);
+  // Keep files belonging to a copied (or cut) card until it's been pasted.
+  try {
+    const clip = JSON.parse(localStorage.getItem('moodboard-clipboard') || 'null');
+    if (clip) for (const r of [...(clip.cards || []), ...(clip.boards || [])]) for (const id of blobRefs(r)) used.add(id);
+  } catch {}
   const orphans = keys.filter(k => !used.has(k));
   if (orphans.length) await db.applyChanges(orphans.map(id => ({ store: 'blobs', id, value: null })));
   return orphans.length;

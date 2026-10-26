@@ -13,6 +13,7 @@ import {
 import { exportFlow } from './backup-ui.js';
 import { syncButton, shareBoardFlow } from './sync-ui.js';
 import * as sync from './sync.js';
+import { startCopy, getClip, peekClip, pasteChanges, clipSize, CLIP_MIME } from './clipboard.js';
 
 const GRID = 12;
 const MIN_S = 0.12, MAX_S = 3;
@@ -738,7 +739,27 @@ export async function mountBoard(root, boardId, { onNavigate }) {
   viewport.addEventListener('pointerup', onUp);
   viewport.addEventListener('pointercancel', onCancel);
   viewport.addEventListener('wheel', onWheel, { passive: false });
-  viewport.addEventListener('contextmenu', e => { if (!e.target.closest('.editing')) e.preventDefault(); });
+  // Right-click (mouse only; a long press on a phone is handled by the long-press timer).
+  let lastPointerType = 'mouse';
+  viewport.addEventListener('contextmenu', e => {
+    if (e.target.closest('.editing')) return;
+    e.preventDefault();
+    if ((e.pointerType || lastPointerType) !== 'mouse') return;
+    const info = classify(e.target);
+    if (connectFrom) { endConnect(); return; }
+    if (info.kind === 'card' || info.kind === 'interactive') { select(info.id); moreMenu(cardOf(info.id)); }
+    else if (info.kind === 'line') select(info.id);
+    else if (info.kind === 'empty') {
+      if (editingId) stopEdit();
+      const w = toWorld(e.clientX, e.clientY);
+      place = { x: w.x, y: w.y };
+      addMenu(true);
+    }
+  });
+  // Where the mouse is, so Ctrl+V pastes under it.
+  let lastMouse = null;
+  viewport.addEventListener('pointermove', e => { if (e.pointerType === 'mouse') lastMouse = { cx: e.clientX, cy: e.clientY }; });
+  viewport.addEventListener('pointerleave', () => { lastMouse = null; });
   world.addEventListener('click', onClickAction);
 
   function classify(target) {
@@ -759,6 +780,7 @@ export async function mountBoard(root, boardId, { onNavigate }) {
   }
 
   function onDown(e) {
+    lastPointerType = e.pointerType || 'mouse';
     if (e.button && e.button !== 0) return;
     const info = classify(e.target);
     if (info.kind === 'editing' || info.kind === 'interactive') return; // let the browser handle it
@@ -1146,7 +1168,7 @@ export async function mountBoard(root, boardId, { onNavigate }) {
     return [...state.cards.values()].filter(l => l.type === 'line' && (ids.has(l.data.from?.id) || ids.has(l.data.to?.id)));
   }
 
-  async function deleteCard(c) {
+  async function deleteCard(c, { cut = false } = {}) {
     const changes = [];
     const ids = new Set([c.id]);
     if (c.type === 'column') for (const x of state.cards.values()) if (x.columnId === c.id) ids.add(x.id);
@@ -1159,14 +1181,16 @@ export async function mountBoard(root, boardId, { onNavigate }) {
     if (c.type === 'board' && c.data.boardId) {
       const sub = state.boards.get(c.data.boardId);
       if (sub) {
-        const ok = await confirmDialog(`Delete “${sub.name}”?`, 'This deletes the board and everything inside it. You can undo straight afterwards.');
-        if (!ok) return;
+        if (!cut) {
+          const ok = await confirmDialog(`Delete “${sub.name}”?`, 'This deletes the board and everything inside it. You can undo straight afterwards.');
+          if (!ok) return;
+        }
         changes.push(...await deleteBoardChanges(sub.id));
       }
     }
     select(null);
-    await commit(changes, { label: 'Delete' });
-    toast(`${TYPE_LABEL[c.type] || 'Card'} deleted`, { label: 'Undo', onClick: doUndo });
+    await commit(changes, { label: cut ? 'Cut' : 'Delete' });
+    toast(`${TYPE_LABEL[c.type] || 'Card'} ${cut ? 'cut' : 'deleted'}`, { label: 'Undo', onClick: doUndo });
   }
 
   async function duplicateCard(c) {
@@ -1216,6 +1240,10 @@ export async function mountBoard(root, boardId, { onNavigate }) {
   async function moreMenu(c) {
     if (!c) return;
     const items = [
+      { label: 'Copy', icon: 'copy', value: 'copy', hint: finePointer() ? 'Ctrl+C' : null },
+      { label: 'Cut', icon: 'cut', value: 'cut', hint: finePointer() ? 'Ctrl+X' : null },
+      (c.type === 'image' || c.type === 'sketch') && window.ClipboardItem && navigator.clipboard?.write ? { label: 'Copy image for other apps', icon: 'image', value: 'copyimage' } : null,
+      { sep: true },
       { label: 'Bring to front', icon: 'front', value: 'front' },
       { label: 'Send to back', icon: 'sendback', value: 'back' },
       { label: c.locked ? 'Unlock position' : 'Lock position', icon: c.locked ? 'unlock' : 'lock', value: 'lock' },
@@ -1237,6 +1265,9 @@ export async function mountBoard(root, boardId, { onNavigate }) {
     const v = await menu(TYPE_LABEL[c.type] || 'Card', items);
     c = cardOf(c.id);
     if (!v || !c) return;
+    if (v === 'copy') copySelected(c, { viaMenu: true });
+    if (v === 'cut') { copySelected(c, { viaMenu: true, quiet: true }); deleteCard(c, { cut: true }); }
+    if (v === 'copyimage') copyImageOut(c);
     if (v === 'front') await commit([cardUpdate(c, { z: maxZ() + 1 })]);
     if (v === 'back') {
       const minZ = Math.min(...[...state.cards.values()].map(x => x.z || 1));
@@ -1340,7 +1371,9 @@ export async function mountBoard(root, boardId, { onNavigate }) {
     const grid = h('div', { class: 'add-grid' });
     const s = sheet({ title: 'Add to board', body: grid, className: 'add-sheet', onClose: () => { if (!chosen) place = null; } });
     let chosen = false;
-    for (const t of ADD_TYPES) {
+    const clip = peekClip();
+    const types = clip ? [{ type: 'pastecard', label: clip.count > 1 ? 'Paste cards' : 'Paste card', icon: 'copy' }, ...ADD_TYPES] : ADD_TYPES;
+    for (const t of types) {
       grid.append(h('button', { class: 'add-tile', onclick: () => { chosen = true; s.close(); setTimeout(() => addOfType(t.type), 60); } },
         h('span', { class: `add-ic t-${t.type}`, html: icon(t.icon) }), h('span', {}, t.label)));
     }
@@ -1416,6 +1449,11 @@ export async function mountBoard(root, boardId, { onNavigate }) {
         return;
       }
       case 'paste': return pasteFromClipboard(p);
+      case 'pastecard': {
+        const clip = await getClip();
+        if (!clip) { toast('Nothing copied yet'); return; }
+        return pasteClip(clip, p);
+      }
     }
   }
 
@@ -1498,14 +1536,112 @@ export async function mountBoard(root, boardId, { onNavigate }) {
   }
 
   // Desktop: paste an image or text straight onto the board.
-  const onDocPaste = e => {
-    if (editingId || document.querySelector('.overlay')) return;
-    const files = [...(e.clipboardData?.files || [])];
-    if (files.length) { e.preventDefault(); addImageFiles(files); return; }
-    const t = e.clipboardData?.getData('text/plain');
-    if (t) { e.preventDefault(); addFromText(t); }
+  const onDocPaste = async e => {
+    if (!keysForBoard()) return;
+    const cd = e.clipboardData;
+    const files = [...(cd?.files || [])];
+    const t = cd?.getData('text/plain') || '';
+    const clipId = cd?.getData(CLIP_MIME) || '';
+    const meta = peekClip();
+    // A card copied in this app (the marker, or failing that the same text we put on the clipboard).
+    const internal = clipId || (meta && meta.text && !files.length && t === meta.text);
+    if (!internal && !files.length && !t) return;
+    e.preventDefault();
+    if (internal) {
+      const clip = await getClip(clipId || meta.id);
+      if (clip) { await pasteClip(clip); return; }
+    }
+    if (files.length) { addImageFiles(files); return; }
+    if (t) addFromText(t);
   };
   document.addEventListener('paste', onDocPaste);
+
+  // Ctrl+C / Ctrl+X on a selected card.
+  const onDocCopy = (e, cut) => {
+    if (!selectedId || !keysForBoard()) return;
+    const sel = getSelection();
+    if (sel && !sel.isCollapsed && sel.toString().trim() && !world.contains(sel.anchorNode)) return;
+    const c = cardOf(selectedId);
+    if (!c) return;
+    const r = copySelected(c, { quiet: cut });
+    if (!r) return;
+    e.preventDefault();
+    e.clipboardData.setData(CLIP_MIME, r.id);
+    if (r.text) e.clipboardData.setData('text/plain', r.text);
+    if (cut) deleteCard(c, { cut: true });
+  };
+  const onCopyEvt = e => onDocCopy(e, false);
+  const onCutEvt = e => onDocCopy(e, true);
+  document.addEventListener('copy', onCopyEvt);
+  document.addEventListener('cut', onCutEvt);
+
+  function keysForBoard() {
+    if (editingId || document.querySelector('.overlay, .layer')) return false;
+    const ae = document.activeElement;
+    return !(ae && (/^(INPUT|TEXTAREA|SELECT)$/.test(ae.tagName) || ae.isContentEditable));
+  }
+
+  function finePointer() { return matchMedia('(pointer: fine)').matches; }
+
+  // The card as it should be copied: out of its column, lines with loose ends.
+  function copySelected(c, { viaMenu = false, quiet = false } = {}) {
+    const copy = structuredClone(c);
+    if (c.type === 'line') {
+      for (const end of ['from', 'to']) { const p = endpoint(c.data[end]); copy.data[end] = { x: Math.round(p.x), y: Math.round(p.y) }; }
+    } else if (c.columnId && cardOf(c.columnId)) {
+      const el = els.get(c.id);
+      if (el && el.offsetWidth) { const r = worldRect(el); copy.x = Math.round(r.x); copy.y = Math.round(r.y); copy.w = Math.round(r.w); }
+      copy.columnId = null;
+    }
+    const r = startCopy(boardId, [copy], state.cards);
+    if (viaMenu && r.text && navigator.clipboard?.writeText) navigator.clipboard.writeText(r.text).catch(() => {});
+    if (!quiet) toast(viaMenu && !finePointer() ? `${TYPE_LABEL[c.type] || 'Card'} copied. Paste it from the + menu on any board.` : `${TYPE_LABEL[c.type] || 'Card'} copied`);
+    return r;
+  }
+
+  let pasteRepeat = { key: '', n: 0 };
+  function pastePoint(clip) {
+    if (lastMouse) {
+      const w = toWorld(lastMouse.cx, lastMouse.cy);
+      let p = { x: snap(w.x - 16), y: snap(w.y - 16) };
+      const key = `${p.x},${p.y}`;
+      pasteRepeat = pasteRepeat.key === key ? { key, n: pasteRepeat.n + 1 } : { key, n: 0 };
+      return { x: p.x + pasteRepeat.n * 24, y: p.y + pasteRepeat.n * 24 };
+    }
+    const s = clipSize(clip, EST_H);
+    return freeSpot(Math.max(120, s.w), Math.max(60, s.h));
+  }
+
+  async function pasteClip(clip, at = null) {
+    if (editingId) stopEdit();
+    const pos = at || pastePoint(clip);
+    const { changes, topIds, skipped } = await pasteChanges(clip, boardId, pos, maxZ() + 1);
+    if (!topIds.length) { toast('Couldn’t paste: the copied card’s files are no longer on this device'); return; }
+    await commit(changes, { label: 'Paste' });
+    const last = topIds[topIds.length - 1];
+    if (cardOf(last)) select(last);
+    if (skipped) toast(`Pasted, but ${skipped} item${skipped === 1 ? '' : 's'} with missing files ${skipped === 1 ? 'was' : 'were'} left out`);
+  }
+
+  // A picture on the system clipboard, for pasting into other apps.
+  async function copyImageOut(c) {
+    const png = (async () => {
+      const blob = await db.getBlob(c.data.blobId);
+      if (!blob) throw new Error('missing');
+      if (blob.type === 'image/png') return blob;
+      const bmp = await createImageBitmap(blob);
+      const cv = document.createElement('canvas');
+      cv.width = bmp.width; cv.height = bmp.height;
+      cv.getContext('2d').drawImage(bmp, 0, 0);
+      return new Promise(res => cv.toBlob(res, 'image/png'));
+    })();
+    try {
+      await navigator.clipboard.write([new ClipboardItem({ 'image/png': png })]);
+      toast('Image copied. Paste it into another app.');
+    } catch {
+      toast('The browser didn’t allow copying the image. Use “Save a copy to the phone” instead.');
+    }
+  }
 
   // Laptop: drag files (or a link) from the desktop or another tab onto the board.
   viewport.addEventListener('dragover', e => { e.preventDefault(); e.dataTransfer.dropEffect = 'copy'; viewport.classList.add('drop-hover'); });
@@ -1531,6 +1667,7 @@ export async function mountBoard(root, boardId, { onNavigate }) {
     if (document.querySelector('.overlay') || editingId) return;
     if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z') { e.preventDefault(); e.shiftKey ? doRedo() : doUndo(); }
     if ((e.key === 'Delete' || e.key === 'Backspace') && selectedId) { e.preventDefault(); deleteCard(cardOf(selectedId)); }
+    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'd' && selectedId) { e.preventDefault(); duplicateCard(cardOf(selectedId)); }
     if (e.key === 'Escape') { if (connectFrom) endConnect(); else if (selectedId) select(null); }
   };
   document.addEventListener('keydown', onKey);
@@ -1705,6 +1842,8 @@ export async function mountBoard(root, boardId, { onNavigate }) {
       syncBtn.destroy();
       ro.disconnect();
       document.removeEventListener('paste', onDocPaste);
+      document.removeEventListener('copy', onCopyEvt);
+      document.removeEventListener('cut', onCutEvt);
       document.removeEventListener('keydown', onKey);
       window.visualViewport?.removeEventListener('resize', onVV);
       cancelAnimationFrame(autoPanRaf);

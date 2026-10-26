@@ -24,6 +24,7 @@ const P = {
   redo: '<path d="M16 6l4 4-4 4"/><path d="M19.5 10H10a5.5 5.5 0 0 0 0 11h2"/>',
   fit: '<path d="M4 9V4h5M15 4h5v5M20 15v5h-5M9 20H4v-5"/>',
   trash: '<path d="M4.5 7h15M9.5 7V4.5h5V7M6.5 7l1 13h9l1-13"/>',
+  cut: '<circle cx="6.5" cy="17.5" r="2.5"/><circle cx="17.5" cy="17.5" r="2.5"/><path d="M8.3 15.7L18 4M15.7 15.7L6 4"/>',
   copy: '<rect x="8" y="8" width="12" height="12" rx="2"/><path d="M16 8V4H4v12h4"/>',
   move: '<path d="M4 12h12M12 8l4 4-4 4"/><path d="M19.5 4.5v15"/>',
   front: '<rect x="8" y="8" width="12" height="12" rx="1.5" fill="currentColor" fill-opacity=".2"/><path d="M4 15V4h11"/>',
